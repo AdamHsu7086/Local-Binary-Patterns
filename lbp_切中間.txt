@@ -1,0 +1,229 @@
+`timescale 1ns/10ps
+module LBP (clk, reset, gray_addr, gray_req, gray_ready, gray_data, lbp_addr, lbp_valid, lbp_data, finish);
+input clk;
+input reset;
+output reg [13:0] gray_addr; //0-16383
+output reg gray_req; //keeping high
+input gray_ready;
+input [7:0] gray_data;
+output reg [13:0] lbp_addr; //less grayaddr than 129
+output reg lbp_valid; //when lbpaddr >= 129 get high
+output reg [7:0] lbp_data;
+output reg finish;
+
+reg [7:0] data0 [0:63];
+reg [7:0] data1 [0:63];
+reg [7:0] data2 [0:63];
+reg [7:0] data3 [0:63];
+reg [7:0] data_add [0:2];
+reg [1:0] data_count; //0-3//判斷gray_data給data0 or data1 or data2 or data3值//判斷data0 or data1 or data2 or data3 給data_add值
+reg [2:0] mode; //6種//gray_addr >= 258開始//data_count = 0時mode為012循環//data_count = 1時為345循環
+reg [5:0] count;//0-63
+reg [5:0] lbp_count;
+
+always @(posedge clk) begin //data_add
+    if(gray_addr >= 256 && data_count == 0)begin
+        data_add[2] <= data0[count];
+        data_add[1] <= data_add[2];
+        data_add[0] <= data_add[1];
+    end
+    else if(gray_addr >= 384 && data_count == 1)begin
+        data_add[2] <= data1[count];
+        data_add[1] <= data_add[2];
+        data_add[0] <= data_add[1];
+    end
+    
+end
+
+always @(*) begin //data_count
+    if(gray_addr <= 63)
+        data_count = 0;
+    else if(gray_addr % 64 == 0)
+        data_count = data_count + 1;
+end
+
+always @(posedge clk) begin //data
+    if(data_count == 0 && gray_req == 1)
+        data0[count] <= gray_data;
+    else if(data_count == 1 && gray_addr >= 63)
+        data1[count] <= gray_data;
+    else if(data_count == 2 && gray_addr >= 127)
+        data2[count] <= gray_data;
+    else if(data_count == 3 && gray_addr >= 190)
+        data3[count] <= gray_data;
+end
+
+always@(posedge clk)begin //lbp_data
+    if(lbp_addr <= 127 || lbp_addr >= 16256 || lbp_addr[6:0] == 126 || lbp_addr[6:0] == 127)
+        lbp_data <= 0;
+    else if(lbp_valid == 1)begin
+    case(mode) 
+        3'b000:begin//mode0
+            lbp_data[0] <= (data_add[0] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data0[lbp_count - 1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data0[lbp_count] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data0[lbp_count + 1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data2[lbp_count - 1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data2[lbp_count + 1] >= data2[lbp_count] ? 1 : 0);
+        end
+        3'b001:begin//mode1
+            lbp_data[0] <= (data_add[0] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data0[lbp_count - 1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data0[lbp_count] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data1[lbp_count - 63] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data2[lbp_count - 1] >= data2[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data3[lbp_count - 63] >= data2[lbp_count] ? 1 : 0);
+        end
+        3'b010:begin//mode2
+            lbp_data[0] <= (data_add[0] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data0[lbp_count + 63] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data1[lbp_count] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data1[lbp_count + 1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data2[lbp_count + 63] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data3[lbp_count + 1] >= data3[lbp_count] ? 1 : 0);
+        end
+        3'b011:begin//mode3
+            lbp_data[0] <= (data_add[0] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data1[lbp_count - 1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data1[lbp_count] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data1[lbp_count + 1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data3[lbp_count - 1] >= data3[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data3[lbp_count + 1] >= data3[lbp_count] ? 1 : 0);
+        end
+        3'b100:begin//mode4
+            lbp_data[0] <= (data_add[0] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data0[lbp_count - 1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data0[lbp_count + 1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data2[lbp_count - 1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data2[lbp_count] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data2[lbp_count + 1] >= data0[lbp_count] ? 1 : 0);
+        end
+        3'b101:begin//mode5
+            lbp_data[0] <= (data_add[0] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data0[lbp_count - 1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data1[lbp_count - 63] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data2[lbp_count - 1] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data2[lbp_count] >= data0[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data3[lbp_count - 63] >= data0[lbp_count] ? 1 : 0);       
+        end
+        3'b110:begin//mode6
+            lbp_data[0] <= (data_add[0] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data0[lbp_count + 63] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data1[lbp_count + 1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data2[lbp_count + 63] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data3[lbp_count] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data3[lbp_count + 1] >= data1[lbp_count] ? 1 : 0);      
+        end
+        3'b111:begin//mode7
+            lbp_data[0] <= (data_add[0] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[1] <= (data_add[1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[2] <= (data_add[2] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[3] <= (data1[lbp_count - 1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[4] <= (data1[lbp_count + 1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[5] <= (data3[lbp_count - 1] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[6] <= (data3[lbp_count] >= data1[lbp_count] ? 1 : 0);
+            lbp_data[7] <= (data3[lbp_count + 1] >= data1[lbp_count] ? 1 : 0);       
+        end
+        default:
+            lbp_data <= 0;     
+    endcase
+    end
+end
+
+always@(posedge clk or posedge reset)begin //gray_req
+    if(reset)
+        gray_req <= 0;
+    else if(gray_addr == 16383)
+        gray_req <= 0;
+    else if(gray_ready == 1)
+        gray_req <= 1;
+    else
+        gray_req <= 0;
+end 
+
+always@(posedge clk) begin //gray_addr
+    if(reset)
+        gray_addr <= 0;
+    else if(gray_addr == 16383)
+        gray_addr <= 16383;
+    else if(gray_req == 1)
+        gray_addr <= gray_addr + 1; 
+    else
+        gray_addr <= 0;
+end
+
+always @(posedge clk) begin //count
+    if(reset)
+        count <= 0;
+    else if(gray_req == 1)
+        count <= count + 1;
+    else
+        count <= 0;
+end
+
+always @(posedge clk) begin //mode
+    if(reset)
+        mode <= 0;
+    else if(lbp_addr < 191 && data_count == 0)
+        mode <= 0;
+    else if(lbp_addr >= 189 && lbp_addr % 128 == 61)
+        mode <= mode + 1;
+    else if(lbp_addr >= 189 && lbp_addr % 128 == 62)
+        mode <= mode + 1;
+    else if(lbp_addr >= 189 && lbp_addr % 128 == 63)
+        mode <= mode + 1;
+    else if(lbp_addr >= 189 && lbp_addr % 128 == 126)
+        mode <= mode + 1;    
+end
+
+always @(posedge clk or posedge reset) begin //lbp_valid
+    if(reset)
+        lbp_valid <= 0;
+    else if(gray_addr >= 130)
+        lbp_valid <= 1;
+    else
+        lbp_valid <= 0;
+end
+
+always @(posedge clk or posedge reset) begin //lbp_addr
+    if(reset)
+        lbp_addr <= 0;
+    else if(lbp_valid == 1)
+        lbp_addr <= lbp_addr + 1;
+    else
+        lbp_addr <= 0;
+end
+
+always @(posedge clk or posedge reset) begin //lbp_addr
+    if(reset)
+        lbp_count <= 0;
+    else if(gray_addr >= 130)
+        lbp_count <= lbp_count + 1;
+    else
+        lbp_count <= 0;
+end
+
+always @(posedge clk or posedge reset) begin //finish
+    if(reset)
+        finish <= 0;
+    else if(lbp_addr == 16383)
+        finish <= 1;
+    else
+        finish <= 0;
+end
+
+endmodule
